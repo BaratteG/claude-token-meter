@@ -35,16 +35,19 @@ const measure = ($: Engine, rateLimits: SessionRateLimit[]) =>
   $.session.measure({ context: { window: 200000 }, rateLimits, cost: { usd: 1.5 }, changed: ['rateLimits'] })
 
 test('counts session tokens and adds them to the history and live global total', async ($, on) => {
-  const lines = world(on, { total: { since: HISTORY.through, tokens: 1_000_000 } })
+  const lines = world(on, { total: { since: HISTORY.through, tokens: 1_000_000, cache: 900_000 } })
   await step($, 0)
   await step($, 1)
-  expect(lines.at(-1)).toBe(`Tokens session : 12,4 k · global : ${fmt(HISTORY.tokens + 1_012_400)} · coût API session : 1,50 $`)
+  expect(lines.at(-1)).toBe(
+    `Tokens session : 12,4 k (dont cache 10,0 k) · global : ${fmt(HISTORY.tokens + 1_012_400)}` +
+      ` (dont cache ${fmt(HISTORY.cache + 910_000)}) · coût API session : 1,50 $`,
+  )
 })
 
 test('a count from before the last import starts over', async ($, on) => {
   const lines = world(on, { total: 1_000_000 })
   await step($, 0)
-  expect(lines.at(-1)).toContain(`global : ${fmt(HISTORY.tokens + 6_200)}`)
+  expect(lines.at(-1)).toContain(`global : ${fmt(HISTORY.tokens + 6_200)} (dont cache ${fmt(HISTORY.cache + 5_000)})`)
 })
 
 test('prices the weekly quota used, across a window reset', { options: { subscriptionUsd: 200 } }, async ($, on) => {

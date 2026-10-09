@@ -4,8 +4,8 @@ import type { EngineInterface, Register, SessionUsage } from 'claude-code'
 import type { Meter } from '../types'
 import { HISTORY } from './history'
 
-const EMPTY: Meter = { tokens: 0, weekLast: null, weekUsed: 0 }
-const session = atom({ plugin: 'token-meter', key: 'session' } as const, EMPTY)
+const EMPTY: Meter = { tokens: 0, cache: 0, weekLast: null, weekUsed: 0 }
+const session = atom({ plugin: 'token-meter', key: 'usage' } as const, EMPTY)
 
 const LABELS: Record<string, string> = { five_hour: '5 h', seven_day: 'semaine' }
 
@@ -17,17 +17,22 @@ let saving: Promise<unknown> = Promise.resolve()
 
 // ponytail: one write at a time within a session; two sessions writing in the same instant can
 // lose a request's count. Upgrade to per-session keys summed at load if that ever matters.
-async function addGlobal($: EngineInterface, n: number) {
+async function addGlobal($: EngineInterface, n: number, c: number) {
   saving = saving
     .catch(() => undefined)
-    .then(async () => $.store.set('total', { since: HISTORY.through, tokens: (await liveTokens($)) + n }))
+    .then(async () => {
+      const l = await live($)
+      await $.store.set('total', { since: HISTORY.through, tokens: l.tokens + n, cache: l.cache + c })
+    })
   await saving
 }
 
 // tokens counted live since the last import; a new import (another `through`) starts it over
-async function liveTokens($: EngineInterface) {
-  const live = (await $.store.get('total')) as { since?: string; tokens?: number } | undefined
-  return live?.since === HISTORY.through ? Number(live.tokens) || 0 : 0
+async function live($: EngineInterface) {
+  const v = (await $.store.get('total')) as { since?: string; tokens?: number; cache?: number } | undefined
+  return v?.since === HISTORY.through
+    ? { tokens: Number(v.tokens) || 0, cache: Number(v.cache) || 0 }
+    : { tokens: 0, cache: 0 }
 }
 
 async function show($: EngineInterface, usage: Pick<SessionUsage, 'rateLimits' | 'cost'>, monthlyUsd: number) {
@@ -38,7 +43,7 @@ async function show($: EngineInterface, usage: Pick<SessionUsage, 'rateLimits' |
     const gained = m.weekLast === null ? 0 : week >= m.weekLast ? week - m.weekLast : week
     return { ...m, weekLast: week, weekUsed: m.weekUsed + gained }
   })
-  const total = HISTORY.tokens + (await liveTokens($))
+  const l = await live($)
 
   // ponytail: the weekly % is account-wide, so parallel sessions inflate this; it amortizes
   // the monthly price over 52/12 weeks of fully used quota. Upgrade if that model is too rough.
@@ -46,8 +51,8 @@ async function show($: EngineInterface, usage: Pick<SessionUsage, 'rateLimits' |
 
   $.ui.status(
     [
-      `Tokens session : ${fmt(m.tokens)}`,
-      `global : ${fmt(total)}`,
+      `Tokens session : ${fmt(m.tokens)} (dont cache ${fmt(m.cache)})`,
+      `global : ${fmt(HISTORY.tokens + l.tokens)} (dont cache ${fmt(HISTORY.cache + l.cache)})`,
       usage.cost && `coût API session : ${usd(usage.cost.usd)}`,
       usage.rateLimits.length > 0 &&
         `abonnement utilisé : ${usage.rateLimits.map(r => `${r.percentUsed} % (${LABELS[r.kind] ?? r.kind})`).join(', ')}`,
@@ -72,9 +77,10 @@ export const register: Register = (on, options) => {
     const { usage: u } = yield* next(e)
     if (!u) return
 
-    const n = u.input_tokens + u.output_tokens + u.cache_read_input_tokens + u.cache_creation_input_tokens
-    await update($, session, m => ({ ...m, tokens: m.tokens + n }))
-    await addGlobal($, n)
+    const c = u.cache_read_input_tokens + u.cache_creation_input_tokens
+    const n = u.input_tokens + u.output_tokens + c
+    await update($, session, m => ({ ...m, tokens: m.tokens + n, cache: m.cache + c }))
+    await addGlobal($, n, c)
     await show($, await $.session.usage(), monthlyUsd)
   })
 }

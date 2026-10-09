@@ -11,7 +11,7 @@ FIELDS = ('input_tokens', 'output_tokens', 'cache_read_input_tokens', 'cache_cre
 
 
 def history(root, cutoff):
-    """{request id: tokens} for requests before `cutoff`; a request is logged once per content
+    """{request id: (tokens, cache tokens)} for requests before `cutoff`; a request is logged once per content
     block and again in resumed sessions, early copies with partial counts, so keep the largest."""
     requests = {}
     for path in root.rglob('*.jsonl'):
@@ -30,7 +30,8 @@ def history(root, cutoff):
                 if not key or row.get('timestamp', '') >= cutoff:
                     continue
                 tokens = sum(msg['usage'].get(k) or 0 for k in FIELDS)
-                requests[key] = max(tokens, requests.get(key, 0))
+                cache = sum(msg['usage'].get(k) or 0 for k in FIELDS[2:])
+                requests[key] = max((tokens, cache), requests.get(key, (0, 0)))
     return requests
 
 
@@ -42,7 +43,7 @@ def selfcheck(tmp):
         {'timestamp': '2026-01-02T00:00:00.000Z', 'message': {'id': 'c', 'usage': {'input_tokens': 5}}},
     ]
     (tmp / 'x.jsonl').write_text('\n'.join(map(json.dumps, rows)) + '\nnot json\n')
-    assert history(tmp, '2026-01-02T00:00:00.000Z') == {'a': 10, 'b': 100}
+    assert history(tmp, '2026-01-02T00:00:00.000Z') == {'a': (10, 0), 'b': (100, 100)}
 
 
 if __name__ == '__main__':
@@ -53,11 +54,12 @@ if __name__ == '__main__':
     now = datetime.datetime.now(datetime.timezone.utc)
     cutoff = now.isoformat(timespec='milliseconds').replace('+00:00', 'Z')
     requests = history(pathlib.Path.home() / '.claude' / 'projects', cutoff)
-    tokens = sum(requests.values())
+    tokens = sum(t for t, _ in requests.values())
+    cache = sum(c for _, c in requests.values())
 
     out = pathlib.Path(__file__).resolve().parent / 'hooks' / 'history.ts'
     out.write_text(
         '// Written by import_history.py: the tokens of every request before `through`.\n'
-        f"export const HISTORY = {{ tokens: {tokens}, through: '{cutoff}' }}\n"
+        f"export const HISTORY = {{ tokens: {tokens}, cache: {cache}, through: '{cutoff}' }}\n"
     )
-    print(f'{tokens:,} tokens in {len(requests):,} requests before {cutoff} -> {out}')
+    print(f'{tokens:,} tokens ({cache:,} cache) in {len(requests):,} requests before {cutoff} -> {out}')
