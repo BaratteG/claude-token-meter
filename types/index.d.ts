@@ -8,8 +8,11 @@ export type Meter = {
   weekUsed: number
 }
 
+// what the band above the prompt draws: the context, colored by size, then the rest
+export type Line = { context: number | null; window: number; rest: string }
+
 declare module 'claude-code' {
   interface PluginState {
-    'token-meter': { usage: Meter }
+    'token-meter': { usage: Meter; line: Line | null }
   }
 }

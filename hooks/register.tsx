@@ -1,17 +1,31 @@
-import { atom, update } from 'claude-code'
+import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, SessionUsage } from 'claude-code'
 
-import type { Meter } from '../types'
+import type { Line, Meter } from '../types'
 import { HISTORY } from './history'
 
 const EMPTY: Meter = { tokens: 0, cache: 0, weekLast: null, weekUsed: 0 }
 const session = atom({ plugin: 'token-meter', key: 'usage' } as const, EMPTY)
+const line = atom({ plugin: 'token-meter', key: 'line' } as const, null as Line | null)
 
 const LABELS: Record<string, string> = { five_hour: '5 h', seven_day: 'semaine' }
 
 export const fmt = (n: number) =>
   (n >= 1e9 ? `${(n / 1e9).toFixed(2)} Md` : n >= 1e6 ? `${(n / 1e6).toFixed(2)} M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)} k` : `${n}`).replace('.', ',')
 const usd = (n: number) => `${n.toFixed(2).replace('.', ',')} $`
+
+const hex = (h: number, s = 0.9, l = 0.5) => {
+  const f = (n: number) => {
+    const k = (n + h / 30) % 12
+    const c = l - s * Math.min(l, 1 - l) * Math.max(-1, Math.min(k - 3, 9 - k, 1))
+    return Math.round(255 * c).toString(16).padStart(2, '0')
+  }
+  return `#${f(0)}${f(8)}${f(4)}`
+}
+
+// green (hue 120) to red (0) at 200k, then through magenta to violet (280) at 400k and beyond
+export const contextColor = (tokens: number) =>
+  hex(tokens <= 200e3 ? 120 - (120 * tokens) / 200e3 : 360 - (80 * Math.min(tokens - 200e3, 200e3)) / 200e3)
 
 let saving: Promise<unknown> = Promise.resolve()
 
@@ -49,19 +63,17 @@ async function show($: EngineInterface, usage: Pick<SessionUsage, 'context' | 'r
   // the monthly price over 52/12 weeks of fully used quota. Upgrade if that model is too rough.
   const subscriptionUsd = (m.weekUsed / 100) * monthlyUsd * (12 / 52)
 
-  $.ui.status(
-    [
-      usage.context.tokens !== undefined && `Contexte : ${fmt(usage.context.tokens)} / ${fmt(usage.context.window)}`,
-      `Tokens session : ${fmt(m.tokens)} (dont cache ${fmt(m.cache)})`,
-      `global : ${fmt(HISTORY.tokens + l.tokens)} (dont cache ${fmt(HISTORY.cache + l.cache)})`,
-      usage.cost && `coût API session : ${usd(usage.cost.usd)}`,
-      usage.rateLimits.length > 0 &&
-        `abonnement utilisé : ${usage.rateLimits.map(r => `${r.percentUsed} % (${LABELS[r.kind] ?? r.kind})`).join(', ')}`,
-      monthlyUsd > 0 && week !== undefined && `≈ ${usd(subscriptionUsd)} d'abonnement`,
-    ]
-      .filter(Boolean)
-      .join(' · '),
-  )
+  const rest = [
+    `Tokens session : ${fmt(m.tokens)} (dont cache ${fmt(m.cache)})`,
+    `global : ${fmt(HISTORY.tokens + l.tokens)} (dont cache ${fmt(HISTORY.cache + l.cache)})`,
+    usage.cost && `coût API session : ${usd(usage.cost.usd)}`,
+    usage.rateLimits.length > 0 &&
+      `abonnement utilisé : ${usage.rateLimits.map(r => `${r.percentUsed} % (${LABELS[r.kind] ?? r.kind})`).join(', ')}`,
+    monthlyUsd > 0 && week !== undefined && `≈ ${usd(subscriptionUsd)} d'abonnement`,
+  ]
+    .filter(Boolean)
+    .join(' · ')
+  await update($, line, () => ({ context: usage.context.tokens ?? null, window: usage.context.window, rest }))
 }
 
 export const register: Register = (on, options) => {
@@ -71,6 +83,24 @@ export const register: Register = (on, options) => {
   on('session.measure', async ($, e, next) => {
     await show($, e, monthlyUsd)
     return next(e)
+  })
+
+  // a band above the prompt, since the status line draws no colors
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    const l = await read($, line)
+    if (e.props.hasSurvey || l === null) return next(e)
+
+    const { Text } = $.ui.resolve(e)
+    return (
+      <Text>
+        {l.context !== null && (
+          <Text color={contextColor(l.context)}>
+            Contexte : {fmt(l.context)} / {fmt(l.window)} ·{' '}
+          </Text>
+        )}
+        {l.rest}
+      </Text>
+    )
   })
 
   // every model request, main thread and subagents: the live part
