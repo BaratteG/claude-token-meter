@@ -98,7 +98,7 @@ export const register: Register = (on, options) => {
             Contexte : {fmt(l.context)} / {fmt(l.window)} ·{' '}
           </Text>
         )}
-        {l.rest}
+        <Text color="suggestion">{l.rest}</Text>
       </Text>
     )
   })

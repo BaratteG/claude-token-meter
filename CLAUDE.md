@@ -31,7 +31,7 @@ Chercher dedans le nom exact (`'turn.step'`, `SessionUsage`, `AbovePrompt: {`) p
 
 ## État au 2026-10-10
 
-- Pas de remote git. Installé au niveau utilisateur (`token-meter@claude-token-meter`), lu directement
+- Remote : Gitea du NAS (`ssh://git@192.168.1.11:2222/gbaratte/claude-token-meter.git`). Installé au niveau utilisateur (`token-meter@claude-token-meter`), lu directement
   depuis ce dossier : une modification s'applique avec `/reload-plugins`, sans réinstaller.
 - `subscriptionUsd` pas encore réglé (`/plugin configure token-meter@claude-token-meter`).
 - Idée proposée, non faite : `/compact` automatique au-delà d'un seuil (`$.session.compact()`).

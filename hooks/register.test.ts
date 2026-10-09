@@ -69,5 +69,7 @@ test('colors the context green, red at 200k, violet from 400k', async ($, on) =>
   )
   world(on)
   await step($, 0)
-  expect((await band($))?.children[0]).toMatchObject({ props: { color: contextColor(50e3) } })
+  const b = await band($)
+  expect(b?.children[0]).toMatchObject({ props: { color: contextColor(50e3) } })
+  expect(b?.children[1]).toMatchObject({ props: { color: 'suggestion' } })
 })
