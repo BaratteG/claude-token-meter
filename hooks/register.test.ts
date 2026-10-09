@@ -1,9 +1,10 @@
-import { expect, test } from 'claude-code/testing'
+import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On, SessionRateLimit } from 'claude-code'
 
 // the engine beneath the plugin: 1000 in / 200 out / 5000 cache read per request, $1.50 spent
-const world = (on: On) => {
+const world = (on: On, store: Record<string, unknown> = {}) => {
+  mock.store(on, store)
   const lines: (string | undefined)[] = []
   on('ui.status', ($, e) => (lines.push(e.text), { value: undefined }))
   on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000 }, rateLimits: [], cost: { usd: 1.5 } } }))
@@ -30,19 +31,19 @@ const step = async ($: Engine, index: number) => {
 const measure = ($: Engine, rateLimits: SessionRateLimit[]) =>
   $.session.measure({ context: { window: 200000 }, rateLimits, cost: { usd: 1.5 }, changed: ['rateLimits'] })
 
-test('sums tokens over requests and shows the API cost', async ($, on) => {
-  const lines = world(on)
+test('counts session tokens and adds them to the global total', async ($, on) => {
+  const lines = world(on, { total: 1_000_000 })
   await step($, 0)
   await step($, 1)
-  expect(lines.at(-1)).toBe('12.4k tokens (in 2.0k · out 400 · cache 10.0k) · API $1.50')
+  expect(lines.at(-1)).toBe('Tokens session : 12,4 k · global : 1,01 M · coût API session : 1,50 $')
 })
 
 test('prices the weekly quota used, across a window reset', { options: { subscriptionUsd: 200 } }, async ($, on) => {
   const lines = world(on)
   await measure($, [{ kind: 'five_hour', percentUsed: 3 }, { kind: 'seven_day', percentUsed: 10 }])
-  expect(lines.at(-1)).toContain('5h 3% · 7j 10% · Abo ≈ $0.00')
+  expect(lines.at(-1)).toContain("abonnement utilisé : 3 % (5 h), 10 % (semaine) · ≈ 0,00 $ d'abonnement")
   await measure($, [{ kind: 'seven_day', percentUsed: 15 }])
-  expect(lines.at(-1)).toContain('Abo ≈ $2.31') // 5% of 200 * 12/52
+  expect(lines.at(-1)).toContain("≈ 2,31 $ d'abonnement") // 5% of 200 * 12/52
   await measure($, [{ kind: 'seven_day', percentUsed: 2 }])
-  expect(lines.at(-1)).toContain('Abo ≈ $3.23') // reset: +2 points
+  expect(lines.at(-1)).toContain("≈ 3,23 $ d'abonnement") // reset: +2 points
 })

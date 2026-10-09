@@ -1,8 +1,6 @@
 export type Meter = {
-  input: number
-  output: number
-  cacheRead: number
-  cacheWrite: number
+  // every token of every model request this session: input, output, cache reads and writes
+  tokens: number
   // last `seven_day` percentage seen, and the points consumed since the mod loaded
   weekLast: number | null
   weekUsed: number
@@ -10,6 +8,6 @@ export type Meter = {
 
 declare module 'claude-code' {
   interface PluginState {
-    'token-meter': { meter: Meter }
+    'token-meter': { session: Meter }
   }
 }
