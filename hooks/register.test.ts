@@ -10,7 +10,7 @@ const world = (on: On, store: Record<string, unknown> = {}) => {
   mock.store(on, store)
   const lines: (string | undefined)[] = []
   on('ui.status', ($, e) => (lines.push(e.text), { value: undefined }))
-  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000 }, rateLimits: [], cost: { usd: 1.5 } } }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { tokens: 50_000, window: 200_000 }, rateLimits: [], cost: { usd: 1.5 } } }))
   on('session.measure', ($, e) => ({ changed: e.changed }))
   on('turn.step', async function* ($, e) {
     return {
@@ -39,7 +39,7 @@ test('counts session tokens and adds them to the history and live global total',
   await step($, 0)
   await step($, 1)
   expect(lines.at(-1)).toBe(
-    `Tokens session : 12,4 k (dont cache 10,0 k) · global : ${fmt(HISTORY.tokens + 1_012_400)}` +
+    `Contexte : 50,0 k / 200,0 k · Tokens session : 12,4 k (dont cache 10,0 k) · global : ${fmt(HISTORY.tokens + 1_012_400)}` +
       ` (dont cache ${fmt(HISTORY.cache + 910_000)}) · coût API session : 1,50 $`,
   )
 })

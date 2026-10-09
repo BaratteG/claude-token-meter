@@ -3,9 +3,10 @@
 Mod Claude Code : affiche en temps réel, dans la ligne de statut sous le prompt :
 
 ```
-Tokens session : 45,2 k (dont cache 43,8 k) · global : 4,07 Md (dont cache 4,06 Md) · coût API session : 1,23 $ · abonnement utilisé : 3 % (5 h), 10 % (semaine) · ≈ 2,31 $ d'abonnement
+Contexte : 182,0 k / 1,00 M · Tokens session : 45,2 k (dont cache 43,8 k) · global : 4,07 Md (dont cache 4,06 Md) · coût API session : 1,23 $ · abonnement utilisé : 3 % (5 h), 10 % (semaine) · ≈ 2,31 $ d'abonnement
 ```
 
+- **Contexte** : la taille actuelle de la conversation, relue à chaque requête, sur la taille maximale de la fenêtre. C'est le chiffre à surveiller pour savoir quand faire `/clear` ou `/compact`.
 - **Tokens session** : tous les tokens traités dans cette session (envoyés, générés, cache), sous-agents compris, mis à jour à chaque requête.
 - **dont cache** : la part relue ou écrite dans le cache de prompt ; Claude relit tout le contexte à chaque requête, à environ un dixième du prix, d'où son poids.
 - **global** : le même cumul sur toutes tes sessions, historique importé compris (voir plus bas).

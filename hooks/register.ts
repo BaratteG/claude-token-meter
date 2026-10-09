@@ -35,7 +35,7 @@ async function live($: EngineInterface) {
     : { tokens: 0, cache: 0 }
 }
 
-async function show($: EngineInterface, usage: Pick<SessionUsage, 'rateLimits' | 'cost'>, monthlyUsd: number) {
+async function show($: EngineInterface, usage: Pick<SessionUsage, 'context' | 'rateLimits' | 'cost'>, monthlyUsd: number) {
   const week = usage.rateLimits.find(r => r.kind === 'seven_day')?.percentUsed
   const m = await update($, session, m => {
     if (week === undefined) return m
@@ -51,6 +51,7 @@ async function show($: EngineInterface, usage: Pick<SessionUsage, 'rateLimits' |
 
   $.ui.status(
     [
+      usage.context.tokens !== undefined && `Contexte : ${fmt(usage.context.tokens)} / ${fmt(usage.context.window)}`,
       `Tokens session : ${fmt(m.tokens)} (dont cache ${fmt(m.cache)})`,
       `global : ${fmt(HISTORY.tokens + l.tokens)} (dont cache ${fmt(HISTORY.cache + l.cache)})`,
       usage.cost && `coût API session : ${usd(usage.cost.usd)}`,
