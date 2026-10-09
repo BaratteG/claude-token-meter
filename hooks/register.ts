@@ -2,14 +2,15 @@ import { atom, update } from 'claude-code'
 import type { EngineInterface, Register, SessionUsage } from 'claude-code'
 
 import type { Meter } from '../types'
+import { HISTORY } from './history'
 
 const EMPTY: Meter = { tokens: 0, weekLast: null, weekUsed: 0 }
 const session = atom({ plugin: 'token-meter', key: 'session' } as const, EMPTY)
 
 const LABELS: Record<string, string> = { five_hour: '5 h', seven_day: 'semaine' }
 
-const fmt = (n: number) =>
-  (n >= 1e6 ? `${(n / 1e6).toFixed(2)} M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)} k` : `${n}`).replace('.', ',')
+export const fmt = (n: number) =>
+  (n >= 1e9 ? `${(n / 1e9).toFixed(2)} Md` : n >= 1e6 ? `${(n / 1e6).toFixed(2)} M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)} k` : `${n}`).replace('.', ',')
 const usd = (n: number) => `${n.toFixed(2).replace('.', ',')} $`
 
 let saving: Promise<unknown> = Promise.resolve()
@@ -19,8 +20,14 @@ let saving: Promise<unknown> = Promise.resolve()
 async function addGlobal($: EngineInterface, n: number) {
   saving = saving
     .catch(() => undefined)
-    .then(async () => $.store.set('total', Number((await $.store.get('total')) ?? 0) + n))
+    .then(async () => $.store.set('total', { since: HISTORY.through, tokens: (await liveTokens($)) + n }))
   await saving
+}
+
+// tokens counted live since the last import; a new import (another `through`) starts it over
+async function liveTokens($: EngineInterface) {
+  const live = (await $.store.get('total')) as { since?: string; tokens?: number } | undefined
+  return live?.since === HISTORY.through ? Number(live.tokens) || 0 : 0
 }
 
 async function show($: EngineInterface, usage: Pick<SessionUsage, 'rateLimits' | 'cost'>, monthlyUsd: number) {
@@ -31,7 +38,7 @@ async function show($: EngineInterface, usage: Pick<SessionUsage, 'rateLimits' |
     const gained = m.weekLast === null ? 0 : week >= m.weekLast ? week - m.weekLast : week
     return { ...m, weekLast: week, weekUsed: m.weekUsed + gained }
   })
-  const total = Number((await $.store.get('total')) ?? 0)
+  const total = HISTORY.tokens + (await liveTokens($))
 
   // ponytail: the weekly % is account-wide, so parallel sessions inflate this; it amortizes
   // the monthly price over 52/12 weeks of fully used quota. Upgrade if that model is too rough.

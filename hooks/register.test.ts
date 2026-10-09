@@ -2,6 +2,9 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On, SessionRateLimit } from 'claude-code'
 
+import { HISTORY } from './history'
+import { fmt } from './register'
+
 // the engine beneath the plugin: 1000 in / 200 out / 5000 cache read per request, $1.50 spent
 const world = (on: On, store: Record<string, unknown> = {}) => {
   mock.store(on, store)
@@ -31,11 +34,17 @@ const step = async ($: Engine, index: number) => {
 const measure = ($: Engine, rateLimits: SessionRateLimit[]) =>
   $.session.measure({ context: { window: 200000 }, rateLimits, cost: { usd: 1.5 }, changed: ['rateLimits'] })
 
-test('counts session tokens and adds them to the global total', async ($, on) => {
-  const lines = world(on, { total: 1_000_000 })
+test('counts session tokens and adds them to the history and live global total', async ($, on) => {
+  const lines = world(on, { total: { since: HISTORY.through, tokens: 1_000_000 } })
   await step($, 0)
   await step($, 1)
-  expect(lines.at(-1)).toBe('Tokens session : 12,4 k · global : 1,01 M · coût API session : 1,50 $')
+  expect(lines.at(-1)).toBe(`Tokens session : 12,4 k · global : ${fmt(HISTORY.tokens + 1_012_400)} · coût API session : 1,50 $`)
+})
+
+test('a count from before the last import starts over', async ($, on) => {
+  const lines = world(on, { total: 1_000_000 })
+  await step($, 0)
+  expect(lines.at(-1)).toContain(`global : ${fmt(HISTORY.tokens + 6_200)}`)
 })
 
 test('prices the weekly quota used, across a window reset', { options: { subscriptionUsd: 200 } }, async ($, on) => {
