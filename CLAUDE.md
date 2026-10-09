@@ -31,7 +31,8 @@ Chercher dedans le nom exact (`'turn.step'`, `SessionUsage`, `AbovePrompt: {`) p
 
 ## État au 2026-10-10
 
-- Pas de remote git. Chargé seulement dans la session de développement (lien symbolique vers
-  `~/.claude/dev-mods/<session>/`) ; pas encore installé via `claude plugin install`.
+- Pas de remote git. Installé au niveau utilisateur (`token-meter@claude-token-meter`), lu directement
+  depuis ce dossier : une modification s'applique avec `/reload-plugins`, sans réinstaller.
+- `subscriptionUsd` pas encore réglé (`/plugin configure token-meter@claude-token-meter`).
 - Idée proposée, non faite : `/compact` automatique au-delà d'un seuil (`$.session.compact()`).
 - Non vérifié : rendu réel des couleurs dans le terminal de l'utilisateur.
