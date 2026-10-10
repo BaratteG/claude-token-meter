@@ -56,11 +56,11 @@ test('a count from before the last import starts over', async ($, on) => {
 test('prices the weekly quota used, across a window reset', { options: { subscriptionUsd: 200 } }, async ($, on) => {
   world(on)
   await measure($, [{ kind: 'five_hour', percentUsed: 3 }, { kind: 'seven_day', percentUsed: 10 }])
-  expect((await band($))?.text).toContain("abo : 3 % (5 h), 10 % (semaine) · ≈ 0,00 $ d'abonnement")
+  expect((await band($))?.text).toContain("abo : 3 % (5 h), 10 % (semaine) · ≈ 0,00 $ d'abo")
   await measure($, [{ kind: 'seven_day', percentUsed: 15 }])
-  expect((await band($))?.text).toContain("≈ 2,31 $ d'abonnement") // 5% of 200 * 12/52
+  expect((await band($))?.text).toContain("≈ 2,31 $ d'abo") // 5% of 200 * 12/52
   await measure($, [{ kind: 'seven_day', percentUsed: 2 }])
-  expect((await band($))?.text).toContain("≈ 3,23 $ d'abonnement") // reset: +2 points
+  expect((await band($))?.text).toContain("≈ 3,23 $ d'abo") // reset: +2 points
 })
 
 test('colors the context green, red at 200k, violet from 400k', async ($, on) => {

@@ -69,7 +69,7 @@ async function show($: EngineInterface, usage: Pick<SessionUsage, 'context' | 'r
     usage.cost && `api : ${usd(usage.cost.usd)}`,
     usage.rateLimits.length > 0 &&
       `abo : ${usage.rateLimits.map(r => `${r.percentUsed} % (${LABELS[r.kind] ?? r.kind})`).join(', ')}`,
-    monthlyUsd > 0 && week !== undefined && `≈ ${usd(subscriptionUsd)} d'abonnement`,
+    monthlyUsd > 0 && week !== undefined && `≈ ${usd(subscriptionUsd)} d'abo`,
   ]
     .filter(Boolean)
     .join(' · ')
