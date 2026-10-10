@@ -4,8 +4,8 @@ import type { EngineInterface, Register, SessionUsage } from 'claude-code'
 import type { Line, Meter } from '../types'
 import { HISTORY } from './history'
 
-const EMPTY: Meter = { tokens: 0, cache: 0, weekLast: null, weekUsed: 0 }
-const session = atom({ plugin: 'token-meter', key: 'usage' } as const, EMPTY)
+const EMPTY: Meter = { tokens: 0, cache: 0, input: 0, output: 0, weekLast: null, weekUsed: 0 }
+const session = atom({ plugin: 'token-meter', key: 'meter' } as const, EMPTY)
 const line = atom({ plugin: 'token-meter', key: 'line' } as const, null as Line | null)
 
 const LABELS: Record<string, string> = { five_hour: '5 h', seven_day: 'semaine' }
@@ -64,11 +64,11 @@ async function show($: EngineInterface, usage: Pick<SessionUsage, 'context' | 'r
   const subscriptionUsd = (m.weekUsed / 100) * monthlyUsd * (12 / 52)
 
   const rest = [
-    `Tokens session : ${fmt(m.tokens)} (dont cache ${fmt(m.cache)})`,
+    `session : ${fmt(m.tokens)} (dont cache ${fmt(m.cache)}, entrée ${fmt(m.input)}, sortie ${fmt(m.output)})`,
     `global : ${fmt(HISTORY.tokens + l.tokens)} (dont cache ${fmt(HISTORY.cache + l.cache)})`,
-    usage.cost && `coût API session : ${usd(usage.cost.usd)}`,
+    usage.cost && `api : ${usd(usage.cost.usd)}`,
     usage.rateLimits.length > 0 &&
-      `abonnement utilisé : ${usage.rateLimits.map(r => `${r.percentUsed} % (${LABELS[r.kind] ?? r.kind})`).join(', ')}`,
+      `abo : ${usage.rateLimits.map(r => `${r.percentUsed} % (${LABELS[r.kind] ?? r.kind})`).join(', ')}`,
     monthlyUsd > 0 && week !== undefined && `≈ ${usd(subscriptionUsd)} d'abonnement`,
   ]
     .filter(Boolean)
@@ -110,7 +110,13 @@ export const register: Register = (on, options) => {
 
     const c = u.cache_read_input_tokens + u.cache_creation_input_tokens
     const n = u.input_tokens + u.output_tokens + c
-    await update($, session, m => ({ ...m, tokens: m.tokens + n, cache: m.cache + c }))
+    await update($, session, m => ({
+      ...m,
+      tokens: m.tokens + n,
+      cache: m.cache + c,
+      input: m.input + u.input_tokens,
+      output: m.output + u.output_tokens,
+    }))
     await addGlobal($, n, c)
     await show($, await $.session.usage(), monthlyUsd)
   })

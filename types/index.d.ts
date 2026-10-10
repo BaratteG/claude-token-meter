@@ -3,6 +3,9 @@ export type Meter = {
   tokens: number
   // the part of `tokens` read from or written to the prompt cache
   cache: number
+  // the parts of `tokens` sent outside the cache, and generated
+  input: number
+  output: number
   // last `seven_day` percentage seen, and the points consumed since the mod loaded
   weekLast: number | null
   weekUsed: number
@@ -13,6 +16,6 @@ export type Line = { context: number | null; window: number; rest: string }
 
 declare module 'claude-code' {
   interface PluginState {
-    'token-meter': { usage: Meter; line: Line | null }
+    'token-meter': { meter: Meter; line: Line | null }
   }
 }

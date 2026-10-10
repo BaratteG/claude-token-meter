@@ -42,8 +42,8 @@ test('counts session tokens and adds them to the history and live global total',
   await step($, 0)
   await step($, 1)
   expect((await band($))?.text).toBe(
-    `Contexte : 50,0 k / 200,0 k · Tokens session : 12,4 k (dont cache 10,0 k) · global : ${fmt(HISTORY.tokens + 1_012_400)}` +
-      ` (dont cache ${fmt(HISTORY.cache + 910_000)}) · coût API session : 1,50 $`,
+    `Contexte : 50,0 k / 200,0 k · session : 12,4 k (dont cache 10,0 k, entrée 2,0 k, sortie 400) · global : ${fmt(HISTORY.tokens + 1_012_400)}` +
+      ` (dont cache ${fmt(HISTORY.cache + 910_000)}) · api : 1,50 $`,
   )
 })
 
@@ -56,7 +56,7 @@ test('a count from before the last import starts over', async ($, on) => {
 test('prices the weekly quota used, across a window reset', { options: { subscriptionUsd: 200 } }, async ($, on) => {
   world(on)
   await measure($, [{ kind: 'five_hour', percentUsed: 3 }, { kind: 'seven_day', percentUsed: 10 }])
-  expect((await band($))?.text).toContain("abonnement utilisé : 3 % (5 h), 10 % (semaine) · ≈ 0,00 $ d'abonnement")
+  expect((await band($))?.text).toContain("abo : 3 % (5 h), 10 % (semaine) · ≈ 0,00 $ d'abonnement")
   await measure($, [{ kind: 'seven_day', percentUsed: 15 }])
   expect((await band($))?.text).toContain("≈ 2,31 $ d'abonnement") // 5% of 200 * 12/52
   await measure($, [{ kind: 'seven_day', percentUsed: 2 }])
