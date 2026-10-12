@@ -14,6 +14,14 @@ export const fmt = (n: number) =>
   (n >= 1e9 ? `${(n / 1e9).toFixed(2)} Md` : n >= 1e6 ? `${(n / 1e6).toFixed(2)} M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)} k` : `${n}`).replace('.', ',')
 const usd = (n: number) => `${n.toFixed(2).replace('.', ',')} $`
 
+// time to a window's reset, to the minute: 3 j 4 h, 2 h 05, 12 min
+const left = (ms: number) => {
+  const m = Math.max(0, Math.ceil(ms / 60e3))
+  const d = Math.floor(m / 1440)
+  const h = Math.floor(m / 60) % 24
+  return d > 0 ? `${d} j ${h} h` : h > 0 ? `${h} h ${String(m % 60).padStart(2, '0')}` : `${m} min`
+}
+
 const hex = (h: number, s = 0.9, l = 0.5) => {
   const f = (n: number) => {
     const k = (n + h / 30) % 12
@@ -23,9 +31,9 @@ const hex = (h: number, s = 0.9, l = 0.5) => {
   return `#${f(0)}${f(8)}${f(4)}`
 }
 
-// green (hue 120) to red (0) at 200k, then through magenta to violet (280) at 400k and beyond
+// green (hue 120) to red (0) at 300k, then through magenta to violet (280) at 500k and beyond
 export const contextColor = (tokens: number) =>
-  hex(tokens <= 200e3 ? 120 - (120 * tokens) / 200e3 : 360 - (80 * Math.min(tokens - 200e3, 200e3)) / 200e3)
+  hex(tokens <= 300e3 ? 120 - (120 * tokens) / 300e3 : 360 - (80 * Math.min(tokens - 300e3, 200e3)) / 200e3)
 
 let saving: Promise<unknown> = Promise.resolve()
 
@@ -58,6 +66,7 @@ async function show($: EngineInterface, usage: Pick<SessionUsage, 'context' | 'r
     return { ...m, weekLast: week, weekUsed: m.weekUsed + gained }
   })
   const l = await live($)
+  const now = await $.clock.now()
 
   // ponytail: the weekly % is account-wide, so parallel sessions inflate this; it amortizes
   // the monthly price over 52/12 weeks of fully used quota. Upgrade if that model is too rough.
@@ -68,7 +77,9 @@ async function show($: EngineInterface, usage: Pick<SessionUsage, 'context' | 'r
     `global : ${fmt(HISTORY.tokens + l.tokens)} (dont cache ${fmt(HISTORY.cache + l.cache)})`,
     usage.cost && `api : ${usd(usage.cost.usd)}`,
     usage.rateLimits.length > 0 &&
-      `abo : ${usage.rateLimits.map(r => `${r.percentUsed} % (${LABELS[r.kind] ?? r.kind})`).join(', ')}`,
+      `abo : ${usage.rateLimits
+        .map(r => `${r.percentUsed} % (${LABELS[r.kind] ?? r.kind}${r.resetsAt ? `, reset dans ${left(Date.parse(r.resetsAt) - now)}` : ''})`)
+        .join(', ')}`,
     monthlyUsd > 0 && week !== undefined && `≈ ${usd(subscriptionUsd)} d'abo`,
   ]
     .filter(Boolean)
@@ -82,6 +93,12 @@ export const register: Register = (on, options) => {
   // after each main-thread turn, and whenever a rate-limit window moves
   on('session.measure', async ($, e, next) => {
     await show($, e, monthlyUsd)
+    return next(e)
+  })
+
+  // the countdowns to the resets move while idle: redraw every minute
+  on('session.start', async ($, e, next) => {
+    if (e.isInteractive) $.clock.every(60e3, async () => show($, await $.session.usage(), monthlyUsd))
     return next(e)
   })
 
