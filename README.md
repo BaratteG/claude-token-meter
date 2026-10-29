@@ -4,13 +4,16 @@ Mod Claude Code : affiche en temps réel, tout en bas, sous la ligne d'aide du p
 
 ```
 🧠 ctx ━━━━━━──── 182k   🕔 5h ────────── 3%  🔄 ━━━━━━──── 2h04   📅 7j ━───────── 10%  🔄 ━━━━━───── 3j3h
-💬 session 45k tokens · 1,23 $ API   📈 global 4,07Md tokens
+🤖 Opus 5.5 · high   💬 session 45k tokens · 1,23 $ API   📈 global 4,07Md tokens
+👥 scout Haiku 5.5 · low   worker Sonnet 5.5 · medium
 ```
 
 Les barres comptent une case par tranche de 10 %. La partie remplie passe du vert au rouge à mesure qu'elle se remplit, le reste est grisé ; le chiffre qui suit, en gras, prend la même couleur. Les libellés sont en gris clair, les icônes dans un gris un peu plus sombre (`#7a7a7a`), sauf 🧠 qui garde ses couleurs. Un emoji ne prend cette couleur que si la police le dessine en monochrome ; une police d'emojis en couleur l'affiche dans ses propres couleurs.
 
 - **ctx** : la taille actuelle de la conversation, relue à chaque requête. La barre se remplit jusqu'au seuil d'autocompact, celui que `/context` indique : pleine, Claude Code compacte la conversation. Sans autocompact, elle se remplit jusqu'à la taille maximale de la fenêtre. C'est le chiffre à surveiller pour savoir quand faire `/clear` ou `/compact`.
 - **5h**, **7j** : part consommée des quotas 5 heures et hebdomadaire. La seconde barre, après 🔄, de couleur fixe, avance avec le temps écoulé dans la fenêtre jusqu'à la remise à zéro, suivie du temps restant ; rafraîchie chaque minute. Une barre de quota plus longue que celle du temps : tu consommes plus vite que le rythme qui tiendrait jusqu'à la remise à zéro. Absents en mode API.
+- **🤖** : le modèle et l'effort de la dernière requête de la conversation principale (après un `/model` ou `/effort`, à la requête suivante). L'effort manque pour un modèle qui n'en prend pas.
+- **👥** : une ligne de plus tant que des sous-agents tournent, lancés en parallèle ou non : leur type, leur modèle et leur effort. Un agent quitte la ligne quand il a fini.
 - **session** : tous les tokens traités dans cette session (envoyés, générés, cache), sous-agents compris, mis à jour à chaque requête, et ce qu'ils coûteraient au prix API, le même total que `/cost`.
 - **global** : le cumul des tokens de toutes tes sessions, historique importé compris (voir plus bas).
 

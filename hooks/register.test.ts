@@ -3,7 +3,7 @@ import type { Engine } from 'claude-code/testing'
 import type { On, SessionRateLimit } from 'claude-code'
 
 import { HISTORY } from './history'
-import { bar, fmt, levelColor } from './register'
+import { bar, fmt, levelColor, modelName } from './register'
 
 // the engine beneath the plugin: 1000 in / 200 out / 5000 cache read per request, $1.50 spent
 // auto-compaction at 125k by default; `null` turns it off
@@ -18,6 +18,7 @@ const world = (on: On, store: Record<string, unknown> = {}, rateLimits: SessionR
     value: { startedAt: 0, context: { tokens: 50_000, window: 200_000, ...(e.breakdown && { breakdown }) }, rateLimits, cost: { usd: 1.5 } },
   }))
   on('session.measure', ($, e) => ({ changed: e.changed }))
+  on('turn.complete', () => ({ text: '' }))
   on('turn.step', async function* ($, e) {
     return {
       turnId: e.turnId,
@@ -31,8 +32,8 @@ const world = (on: On, store: Record<string, unknown> = {}, rateLimits: SessionR
   return mock.clock(on, { now: Date.parse('2026-10-12T10:00:00Z') })
 }
 
-const step = async ($: Engine, index: number) => {
-  const s = $.turn.step({ turnId: 't', index, model: 'm', messageCount: 1 })
+const step = async ($: Engine, index: number, run: { model?: string; effort?: 'low' | 'high'; agentId?: string } = {}) => {
+  const s = $.turn.step({ turnId: 't', index, model: 'claude-opus-5-5', effort: 'high', messageCount: 1, ...run })
   for await (const _ of s);
   await s.result
 }
@@ -80,7 +81,7 @@ test('counts session tokens and adds them to the history and live global total',
   await step($, 0)
   await step($, 1)
   expect((await status($))).toBe(
-    ['🧠 ctx ━━━━────── 50k', `💬 session 12k tokens · 1,50 $ API   📈 global ${fmt(HISTORY.tokens + 1_012_400)} tokens`].join('\n'),
+    ['🧠 ctx ━━━━────── 50k', `🤖 Opus 5.5 · high   💬 session 12k tokens · 1,50 $ API   📈 global ${fmt(HISTORY.tokens + 1_012_400)} tokens`].join('\n'),
   )
 })
 
@@ -136,7 +137,7 @@ test("keeps the engine's hint line above the meter", async ($, on) => {
   expect(rows[0]).toBe('? for shortcuts')
   // one blank row between them
   expect((await meter($)).props).toMatchObject({ marginTop: 1, paddingLeft: 2 })
-  expect(rows.slice(1).map(r => r.split(' ')[1])).toEqual(['ctx', 'session'])
+  expect(rows.slice(1).map(r => r.split(' ')[1])).toEqual(['ctx', 'Opus'])
 })
 
 test('colors the filled part green to red by level, dims the rest', async ($, on) => {
@@ -171,4 +172,27 @@ test('marks each group with an icon, its label subdued', async ($, on) => {
   expect(piece('🧠 ')).toEqual([{}])
   expect([...piece('🕔 '), ...piece('🔄 ')]).toEqual([{ color: '#7a7a7a' }, { color: '#7a7a7a' }])
   expect([...piece('ctx '), ...piece('5h ')]).toEqual([{ color: 'inactive' }, { color: 'inactive' }])
+})
+
+test('names a model by its family and version', async () => {
+  expect(['claude-opus-5-5', 'claude-haiku-4-5-20251001', 'claude-opus-4-20250514', 'claude-3-5-haiku-20241022', 'claude-sonnet-5-5[1m]', 'm'].map(modelName)).toEqual(
+    ['Opus 5.5', 'Haiku 4.5', 'Opus 4', 'Haiku 3.5', 'Sonnet 5.5', 'm'],
+  )
+})
+
+test('lists the subagents running, each with its model and effort, until its run ends', async ($, on) => {
+  world(on)
+  const status = { a1: 'running', a2: 'running', a3: 'completed' }
+  on('agent.list', () => ({
+    value: Object.entries(status).map(([id, s]) => ({ id, description: id, type: { a1: 'scout', a2: 'worker', a3: 'deep' }[id]!, status: s as never })),
+  }))
+  await step($, 0)
+  await step($, 0, { agentId: 'a1', model: 'claude-haiku-5-5', effort: 'low' })
+  await step($, 0, { agentId: 'a2', model: 'claude-sonnet-5-5' })
+  await step($, 0, { agentId: 'a3', model: 'claude-opus-5-5' })
+  expect((await bottom($)).at(-1)).toBe('👥 scout Haiku 5.5 · low   worker Sonnet 5.5 · high')
+  await $.turn.complete({ turnId: 't', agentId: 'a1', answer: '', durationMs: 0, isAborted: false, reason: 'answer' })
+  expect((await bottom($)).at(-1)).toBe('👥 worker Sonnet 5.5 · high')
+  await $.turn.complete({ turnId: 't', agentId: 'a2', answer: '', durationMs: 0, isAborted: false, reason: 'answer' })
+  expect((await bottom($)).at(-1)).toStartWith('🤖 Opus 5.5 · high   💬 session')
 })
