@@ -3,13 +3,20 @@ import type { Engine } from 'claude-code/testing'
 import type { On, SessionRateLimit } from 'claude-code'
 
 import { HISTORY } from './history'
-import { contextColor, fmt } from './register'
+import { bar, fmt, levelColor } from './register'
 
 // the engine beneath the plugin: 1000 in / 200 out / 5000 cache read per request, $1.50 spent
-const world = (on: On, store: Record<string, unknown> = {}, rateLimits: SessionRateLimit[] = []) => {
+// auto-compaction at 125k by default; `null` turns it off
+const world = (on: On, store: Record<string, unknown> = {}, rateLimits: SessionRateLimit[] = [], threshold: number | null = 125_000) => {
   mock.store(on, store)
+  on('ui.status', () => ({ value: undefined }))
+  // the engine's own hint line
+  on('ui.render', { component: 'PromptHint' }, () => ({ type: 'Text' as const, children: ['? for shortcuts'] }))
   on('session.start', ($, e) => ({ cwd: e.cwd }))
-  on('session.usage', () => ({ value: { startedAt: 0, context: { tokens: 50_000, window: 200_000 }, rateLimits, cost: { usd: 1.5 } } }))
+  const breakdown = { isAutoCompactEnabled: threshold !== null, ...(threshold !== null && { autoCompactThreshold: threshold }) } as never
+  on('session.usage', ($, e) => ({
+    value: { startedAt: 0, context: { tokens: 50_000, window: 200_000, ...(e.breakdown && { breakdown }) }, rateLimits, cost: { usd: 1.5 } },
+  }))
   on('session.measure', ($, e) => ({ changed: e.changed }))
   on('turn.step', async function* ($, e) {
     return {
@@ -30,10 +37,39 @@ const step = async ($: Engine, index: number) => {
   await s.result
 }
 
-// the band above the prompt as the terminal draws it: its outer Text
-const band = async ($: Engine) => {
-  const ui = await $.ui.mount({ plugin: 'token-meter', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false } as never })
-  return ui.find({ type: 'Text' })
+// the tree drawn at the bottom: the engine's hint line, then the meter's rows
+const drawn = async ($: Engine) =>
+  (
+    await $.ui.mount({
+      plugin: 'token-meter',
+      surface: 'terminal',
+      component: 'PromptHint',
+      props: { isDraft: false, isWorking: false, hint: '? for shortcuts' },
+    })
+  ).drawn()
+
+// the same as text, one entry per row
+const bottom = async ($: Engine) => {
+  const d = await drawn($)
+  if (d.type !== 'Box') return [textOf(d)]
+  const [hint, meter] = (d.children ?? []) as { children?: unknown[] }[]
+  return [textOf(hint), ...(meter?.children ?? []).map(textOf)]
+}
+
+// the meter's block under the hint line, and its rows
+const meter = async ($: Engine) => ((await drawn($)).children ?? [])[1] as { props?: object; children?: unknown[] }
+
+const textOf = (n: unknown): string =>
+  typeof n === 'string' ? n : ((n as { children?: unknown[] }).children ?? []).map(textOf).join('')
+
+// the meter's lines, one per row
+const status = async ($: Engine) => (await bottom($)).slice(1).join('\n')
+
+// the styled pieces of the meter's first row, by the text each draws
+const firstRow = async ($: Engine) => {
+  const row = ((await meter($)).children ?? [])[0] as { children?: unknown[] }
+  const pieces = (row.children ?? []).map(c => (typeof c === 'string' ? { text: c, props: {} } : { text: textOf(c), props: (c as { props?: object }).props ?? {} }))
+  return (text: string) => pieces.filter(p => p.text === text).map(p => p.props)
 }
 
 const measure = ($: Engine, rateLimits: SessionRateLimit[]) =>
@@ -43,26 +79,23 @@ test('counts session tokens and adds them to the history and live global total',
   world(on, { total: { since: HISTORY.through, tokens: 1_000_000, cache: 900_000 } })
   await step($, 0)
   await step($, 1)
-  expect((await band($))?.text).toBe(
-    `Contexte : 50,0 k / 200,0 k · session : 12,4 k (dont cache 10,0 k, entrée 2,0 k, sortie 400) · global : ${fmt(HISTORY.tokens + 1_012_400)}` +
-      ` (dont cache ${fmt(HISTORY.cache + 910_000)}) · api : 1,50 $`,
+  expect((await status($))).toBe(
+    ['🧠 ctx ━━━━────── 50k', `💬 session 12k tokens · 1,50 $ API   📈 global ${fmt(HISTORY.tokens + 1_012_400)} tokens`].join('\n'),
   )
 })
 
 test('a count from before the last import starts over', async ($, on) => {
   world(on, { total: 1_000_000 })
   await step($, 0)
-  expect((await band($))?.text).toContain(`global : ${fmt(HISTORY.tokens + 6_200)} (dont cache ${fmt(HISTORY.cache + 5_000)})`)
+  expect((await status($))).toContain(`📈 global ${fmt(HISTORY.tokens + 6_200)} tokens`)
 })
 
-test('prices the weekly quota used, across a window reset', { options: { subscriptionUsd: 200 } }, async ($, on) => {
+test('draws a bar per quota', async ($, on) => {
   world(on)
   await measure($, [{ kind: 'five_hour', percentUsed: 3 }, { kind: 'seven_day', percentUsed: 10 }])
-  expect((await band($))?.text).toContain("abo : 3 % (5 h), 10 % (semaine) · ≈ 0,00 $ d'abo")
-  await measure($, [{ kind: 'seven_day', percentUsed: 15 }])
-  expect((await band($))?.text).toContain("≈ 2,31 $ d'abo") // 5% of 200 * 12/52
-  await measure($, [{ kind: 'seven_day', percentUsed: 2 }])
-  expect((await band($))?.text).toContain("≈ 3,23 $ d'abo") // reset: +2 points
+  expect((await status($))).toBe(
+    `🕔 5h ────────── 3%   📅 7j ━───────── 10%\n💬 session 0 tokens · 1,50 $ API   📈 global ${fmt(HISTORY.tokens)} tokens`,
+  )
 })
 
 test('counts down to each window reset, redrawn every minute', async ($, on) => {
@@ -72,18 +105,70 @@ test('counts down to each window reset, redrawn every minute', async ($, on) => 
   ])
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await clock.advance(60e3)
-  expect((await band($))?.text).toContain('abo : 3 % (5 h, reset dans 2 h 04), 10 % (semaine, reset dans 3 j 3 h)')
+  expect((await status($))).toContain('   🕔 5h ────────── 3%  🔄 ━━━━━━──── 2h04   📅 7j ━───────── 10%  🔄 ━━━━━───── 3j3h\n')
   await clock.advance(120 * 60e3)
-  expect((await band($))?.text).toContain('3 % (5 h, reset dans 4 min), 10 % (semaine, reset dans 3 j 1 h)')
+  expect((await status($))).toContain('   🕔 5h ────────── 3%  🔄 ━━━━━━━━━━ 4min   📅 7j ━───────── 10%  🔄 ━━━━━━──── 3j1h\n')
 })
 
-test('colors the context green, red at 300k, violet from 500k', async ($, on) => {
-  expect([0, 150e3, 300e3, 400e3, 500e3, 900e3].map(contextColor)).toEqual(
-    ['#0df20d', '#f2f20d', '#f20d0d', '#f20da6', '#a60df2', '#a60df2'],
+test('draws a percentage as a 10-cell bar, one cell per 10 %', async () => {
+  expect([0, 4, 5, 37, 100, 120].map(p => bar(p).map(s => s.text).join(''))).toEqual(
+    ['──────────', '──────────', '━─────────', '━━━━──────', '━━━━━━━━━━', '━━━━━━━━━━'],
   )
+})
+
+test('fills the context bar toward the auto-compaction threshold', async ($, on) => {
+  world(on, {}, [], 400_000)
+  await step($, 0)
+  expect((await status($))).toStartWith('🧠 ctx ━───────── 50k\n')
+})
+
+test('without auto-compaction, the context bar fills toward the whole window', async ($, on) => {
+  world(on, {}, [], null)
+  await step($, 0)
+  expect((await status($))).toStartWith('🧠 ctx ━━━─────── 50k\n')
+})
+
+test("keeps the engine's hint line above the meter", async ($, on) => {
+  world(on)
+  expect(await bottom($)).toEqual(['? for shortcuts'])
+  await step($, 0)
+  const rows = await bottom($)
+  expect(rows[0]).toBe('? for shortcuts')
+  // one blank row between them
+  expect((await meter($)).props).toMatchObject({ marginTop: 1, paddingLeft: 2 })
+  expect(rows.slice(1).map(r => r.split(' ')[1])).toEqual(['ctx', 'session'])
+})
+
+test('colors the filled part green to red by level, dims the rest', async ($, on) => {
+  expect([0, 50, 100, 150].map(levelColor)).toEqual(['#0df20d', '#f2f20d', '#f20d0d', '#f20d0d'])
+  expect(bar(37)).toEqual([
+    { text: '━━━━', color: levelColor(37) },
+    { text: '──────', dimColor: true },
+  ])
   world(on)
   await step($, 0)
-  const b = await band($)
-  expect(b?.children[0]).toMatchObject({ props: { color: contextColor(50e3) } })
-  expect(b?.children[1]).toMatchObject({ props: { color: 'suggestion' } })
+  const piece = await firstRow($)
+  // 50k of 125k: 40 %, the filled part and the figure in that level's color
+  expect(piece('━━━━')).toEqual([{ color: levelColor(40) }])
+  expect(piece('──────')).toEqual([{ dimColor: true }])
+  expect(piece('50k')).toEqual([{ bold: true, color: levelColor(40) }])
+})
+
+test('draws the time gone in a quota window in a color of its own', async ($, on) => {
+  world(on, {}, [{ kind: 'five_hour', percentUsed: 3, resetsAt: '2026-10-12T12:30:00Z' }], null)
+  await measure($, [{ kind: 'five_hour', percentUsed: 3, resetsAt: '2026-10-12T12:30:00Z' }])
+  const piece = await firstRow($)
+  // 2h30 left of 5h: half the window gone
+  expect(piece('━━━━━')).toEqual([{ color: 'suggestion' }])
+  expect(piece('2h30')).toEqual([{ color: 'inactive' }])
+})
+
+test('marks each group with an icon, its label subdued', async ($, on) => {
+  world(on, {}, [{ kind: 'five_hour', percentUsed: 3, resetsAt: '2026-10-12T12:30:00Z' }])
+  await step($, 0)
+  const piece = await firstRow($)
+  // the context's emoji keeps its own colors, the other icons take a gray a shade under the labels'
+  expect(piece('🧠 ')).toEqual([{}])
+  expect([...piece('🕔 '), ...piece('🔄 ')]).toEqual([{ color: '#7a7a7a' }, { color: '#7a7a7a' }])
+  expect([...piece('ctx '), ...piece('5h ')]).toEqual([{ color: 'inactive' }, { color: 'inactive' }])
 })

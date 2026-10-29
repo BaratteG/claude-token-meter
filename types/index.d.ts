@@ -6,16 +6,16 @@ export type Meter = {
   // the parts of `tokens` sent outside the cache, and generated
   input: number
   output: number
-  // last `seven_day` percentage seen, and the points consumed since the mod loaded
-  weekLast: number | null
-  weekUsed: number
 }
 
-// what the band above the prompt draws: the context, colored by size, then the rest
-export type Line = { context: number | null; window: number; rest: string }
+// the auto-compaction threshold as last read; `tokens` null when auto-compaction is off
+export type CompactAt = { tokens: number | null }
+
+// a run of text in a row under the prompt, with its style
+export type Segment = { text: string; color?: string; dimColor?: boolean; bold?: boolean }
 
 declare module 'claude-code' {
   interface PluginState {
-    'token-meter': { meter: Meter; line: Line | null }
+    'token-meter': { meter: Meter; compactAt: CompactAt | null; rows: Segment[][] }
   }
 }

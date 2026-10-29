@@ -1,25 +1,36 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, SessionUsage } from 'claude-code'
 
-import type { Line, Meter } from '../types'
+import type { CompactAt, Meter, Segment } from '../types'
 import { HISTORY } from './history'
 
-const EMPTY: Meter = { tokens: 0, cache: 0, input: 0, output: 0, weekLast: null, weekUsed: 0 }
+const EMPTY: Meter = { tokens: 0, cache: 0, input: 0, output: 0 }
 const session = atom({ plugin: 'token-meter', key: 'meter' } as const, EMPTY)
-const line = atom({ plugin: 'token-meter', key: 'line' } as const, null as Line | null)
+const compactAt = atom({ plugin: 'token-meter', key: 'compactAt' } as const, null as CompactAt | null)
+// the rows drawn under the prompt's hint line, each a run of styled segments
+const meterRows = atom({ plugin: 'token-meter', key: 'rows' } as const, [] as Segment[][])
 
-const LABELS: Record<string, string> = { five_hour: '5 h', seven_day: 'semaine' }
+const LABELS: Record<string, string> = { five_hour: '5h', seven_day: '7j' }
+// one per group, two columns wide; the person's font draws all but the context's in one color, so
+// they take ICON_COLOR (the plain set, if a font draws them in their own: ◐ ◷ ↻ ● ∑)
+const ICONS = { context: '🧠', quota: '⏳', reset: '🔄', session: '💬', global: '📈' }
+// a quota's own icon, by window; another kind takes ICONS.quota
+const QUOTA_ICONS: Record<string, string> = { five_hour: '🕔', seven_day: '📅' }
+// the labels' gray (the dark theme's `inactive`, #999999) 20 % darker; no theme color is read
+const ICON_COLOR = '#7a7a7a'
+// each window's length, to draw how far into it we are
+const WINDOW_MS: Record<string, number> = { five_hour: 5 * 3600e3, seven_day: 7 * 86400e3 }
 
 export const fmt = (n: number) =>
-  (n >= 1e9 ? `${(n / 1e9).toFixed(2)} Md` : n >= 1e6 ? `${(n / 1e6).toFixed(2)} M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)} k` : `${n}`).replace('.', ',')
+  (n >= 1e9 ? `${(n / 1e9).toFixed(2)}Md` : n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}k` : `${n}`).replace('.', ',')
 const usd = (n: number) => `${n.toFixed(2).replace('.', ',')} $`
 
-// time to a window's reset, to the minute: 3 j 4 h, 2 h 05, 12 min
+// time to a window's reset, to the minute: 3j4h, 2h05, 12min
 const left = (ms: number) => {
   const m = Math.max(0, Math.ceil(ms / 60e3))
   const d = Math.floor(m / 1440)
   const h = Math.floor(m / 60) % 24
-  return d > 0 ? `${d} j ${h} h` : h > 0 ? `${h} h ${String(m % 60).padStart(2, '0')}` : `${m} min`
+  return d > 0 ? `${d}j${h}h` : h > 0 ? `${h}h${String(m % 60).padStart(2, '0')}` : `${m}min`
 }
 
 const hex = (h: number, s = 0.9, l = 0.5) => {
@@ -31,11 +42,21 @@ const hex = (h: number, s = 0.9, l = 0.5) => {
   return `#${f(0)}${f(8)}${f(4)}`
 }
 
-// green (hue 120) to red (0) at 300k, then through magenta to violet (280) at 500k and beyond
-export const contextColor = (tokens: number) =>
-  hex(tokens <= 300e3 ? 120 - (120 * tokens) / 300e3 : 360 - (80 * Math.min(tokens - 300e3, 200e3)) / 200e3)
+// green (hue 120) when empty, through yellow, to red (0) when full
+export const levelColor = (percent: number) => hex(120 - 1.2 * Math.max(0, Math.min(100, percent)))
+
+// a thin 10-cell bar, one cell per 10 %: the filled part colored by level unless told, the rest dim
+export const bar = (percent: number, color = levelColor(percent)): Segment[] => {
+  const n = Math.round(Math.max(0, Math.min(100, percent)) / 10)
+  return [
+    { text: '━'.repeat(n), color },
+    { text: '─'.repeat(10 - n), dimColor: true },
+  ].filter(s => s.text)
+}
 
 let saving: Promise<unknown> = Promise.resolve()
+// earlier versions pinned the meter as the status line: drop it once per load
+let unpinned = false
 
 // ponytail: one write at a time within a session; two sessions writing in the same instant can
 // lose a request's count. Upgrade to per-session keys summed at load if that ever matters.
@@ -57,66 +78,108 @@ async function live($: EngineInterface) {
     : { tokens: 0, cache: 0 }
 }
 
-async function show($: EngineInterface, usage: Pick<SessionUsage, 'context' | 'rateLimits' | 'cost'>, monthlyUsd: number) {
-  const week = usage.rateLimits.find(r => r.kind === 'seven_day')?.percentUsed
-  const m = await update($, session, m => {
-    if (week === undefined) return m
-    // a drop means the weekly window reset: all of `week` was used since
-    const gained = m.weekLast === null ? 0 : week >= m.weekLast ? week - m.weekLast : week
-    return { ...m, weekLast: week, weekUsed: m.weekUsed + gained }
-  })
-  const l = await live($)
-  const now = await $.clock.now()
-
-  // ponytail: the weekly % is account-wide, so parallel sessions inflate this; it amortizes
-  // the monthly price over 52/12 weeks of fully used quota. Upgrade if that model is too rough.
-  const subscriptionUsd = (m.weekUsed / 100) * monthlyUsd * (12 / 52)
-
-  const rest = [
-    `session : ${fmt(m.tokens)} (dont cache ${fmt(m.cache)}, entrée ${fmt(m.input)}, sortie ${fmt(m.output)})`,
-    `global : ${fmt(HISTORY.tokens + l.tokens)} (dont cache ${fmt(HISTORY.cache + l.cache)})`,
-    usage.cost && `api : ${usd(usage.cost.usd)}`,
-    usage.rateLimits.length > 0 &&
-      `abo : ${usage.rateLimits
-        .map(r => `${r.percentUsed} % (${LABELS[r.kind] ?? r.kind}${r.resetsAt ? `, reset dans ${left(Date.parse(r.resetsAt) - now)}` : ''})`)
-        .join(', ')}`,
-    monthlyUsd > 0 && week !== undefined && `≈ ${usd(subscriptionUsd)} d'abo`,
-  ]
-    .filter(Boolean)
-    .join(' · ')
-  await update($, line, () => ({ context: usage.context.tokens ?? null, window: usage.context.window, rest }))
+// the token count at which auto-compaction runs, from /context's local estimate (no request)
+async function refreshCompactAt($: EngineInterface) {
+  const b = (await $.session.usage({ breakdown: 'summary' })).context.breakdown
+  if (b) await update($, compactAt, () => ({ tokens: b.isAutoCompactEnabled ? (b.autoCompactThreshold ?? null) : null }))
 }
 
-export const register: Register = (on, options) => {
-  const monthlyUsd = Number(options.subscriptionUsd) || 0
+async function show($: EngineInterface, usage: Pick<SessionUsage, 'context' | 'rateLimits' | 'cost'>) {
+  const m = await read($, session)
+  const l = await live($)
+  // not read yet, after a reload for instance: read it now
+  if ((await read($, compactAt)) === null) await refreshCompactAt($)
+  // the context fills toward the auto-compaction threshold, or the whole window when it is off
+  const limit = (await read($, compactAt))?.tokens ?? usage.context.window
+  const now = await $.clock.now()
 
+
+  // icons in Claude's accent, labels and units subdued, figures bold; groups apart by space alone
+  const GAP: Segment = { text: '   ' }
+  const icon = (c: string): Segment => ({ text: `${c} `, ...(c !== ICONS.context && { color: ICON_COLOR }) })
+  const label = (t: string): Segment => ({ text: `${t} `, color: 'inactive' })
+  const unit = (t: string): Segment => ({ text: t, color: 'inactive' })
+  const figure = (t: string, color?: string): Segment => ({ text: t, bold: true, ...(color && { color }) })
+  const gauge = (c: string, name: string, percent: number, value: string): Segment[] => [
+    icon(c),
+    label(name),
+    ...bar(percent),
+    { text: ' ' },
+    figure(value, levelColor(percent)),
+  ]
+
+  // the first row, every bar: the context, then each quota's use and the time gone in its window,
+  // filling toward the reset, with the time left after it
+  const bars: Segment[][] = [
+    ...(usage.context.tokens !== undefined ? [gauge(ICONS.context, 'ctx', (100 * usage.context.tokens) / limit, fmt(usage.context.tokens))] : []),
+    ...usage.rateLimits.map(r => {
+      const used = gauge(QUOTA_ICONS[r.kind] ?? ICONS.quota, LABELS[r.kind] ?? r.kind, r.percentUsed, `${r.percentUsed}%`)
+      if (!r.resetsAt) return used
+      const toReset = Date.parse(r.resetsAt) - now
+      const span = WINDOW_MS[r.kind]
+      return [
+        ...used,
+        { text: '  ' },
+        icon(ICONS.reset),
+        ...(span ? [...bar(100 - (100 * toReset) / span, 'suggestion'), { text: ' ' }] : []),
+        unit(left(toReset)),
+      ]
+    }),
+  ]
+  // the second row: this session's tokens and what they cost, then the total over every session
+  const figures: Segment[] = [
+    icon(ICONS.session),
+    label('session'),
+    figure(fmt(m.tokens)),
+    unit(' tokens'),
+    ...(usage.cost ? [unit(' · '), figure(usd(usage.cost.usd)), unit(' API')] : []),
+    GAP,
+    icon(ICONS.global),
+    label('global'),
+    figure(fmt(HISTORY.tokens + l.tokens)),
+    unit(' tokens'),
+  ]
+
+  const rows = [...(bars.length > 0 ? [bars.flatMap((g, i) => (i > 0 ? [GAP, ...g] : g))] : []), figures]
+  await update($, meterRows, () => rows)
+  if (!unpinned) {
+    unpinned = true
+    $.ui.status(undefined)
+  }
+}
+
+export const register: Register = on => {
   // after each main-thread turn, and whenever a rate-limit window moves
   on('session.measure', async ($, e, next) => {
-    await show($, e, monthlyUsd)
+    // the threshold follows the model and its window: reread it as the context moves
+    if (e.changed.includes('context')) await refreshCompactAt($)
+    await show($, e)
     return next(e)
   })
 
   // the countdowns to the resets move while idle: redraw every minute
   on('session.start', async ($, e, next) => {
-    if (e.isInteractive) $.clock.every(60e3, async () => show($, await $.session.usage(), monthlyUsd))
+    if (e.isInteractive) $.clock.every(60e3, async () => show($, await $.session.usage()))
     return next(e)
   })
 
-  // a band above the prompt, since the status line draws no colors
-  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    const l = await read($, line)
-    if (e.props.hasSurvey || l === null) return next(e)
+  // under the prompt's hint line, kept as the engine draws it; the status line folds newlines away
+  on('ui.render', { component: 'PromptHint' }, async ($, e, next) => {
+    const hint = await next(e)
+    const rows = await read($, meterRows)
+    if (rows.length === 0) return hint
 
-    const { Text } = $.ui.resolve(e)
+    const { Box, Text } = $.ui.resolve(e)
     return (
-      <Text>
-        {l.context !== null && (
-          <Text color={contextColor(l.context)}>
-            Contexte : {fmt(l.context)} / {fmt(l.window)} ·{' '}
-          </Text>
-        )}
-        <Text color="suggestion">{l.rest}</Text>
-      </Text>
+      <Box flexDirection="column">
+        {hint}
+        {/* a blank row between the engine's line (the mode, its pills) and the meter, indented as that line is */}
+        <Box flexDirection="column" marginTop={1} paddingLeft={2}>
+          {rows.map(r => (
+            <Text>{r.map(({ text, ...style }) => (Object.keys(style).length > 0 ? <Text {...style}>{text}</Text> : text))}</Text>
+          ))}
+        </Box>
+      </Box>
     )
   })
 
@@ -135,6 +198,6 @@ export const register: Register = (on, options) => {
       output: m.output + u.output_tokens,
     }))
     await addGlobal($, n, c)
-    await show($, await $.session.usage(), monthlyUsd)
+    await show($, await $.session.usage())
   })
 }

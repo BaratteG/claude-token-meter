@@ -1,18 +1,20 @@
 # token-meter
 
-Mod Claude Code : affiche en temps réel, dans un bandeau au-dessus du prompt :
+Mod Claude Code : affiche en temps réel, tout en bas, sous la ligne d'aide du prompt (`? for shortcuts`, le mode auto et ses pastilles), après une ligne vide :
 
 ```
-Contexte : 182,0 k / 1,00 M · session : 45,2 k (dont cache 43,8 k, entrée 1,1 k, sortie 300) · global : 4,07 Md (dont cache 4,06 Md) · api : 1,23 $ · abo : 3 % (5 h, reset dans 2 h 04), 10 % (semaine, reset dans 3 j 3 h) · ≈ 2,31 $ d'abo
+🧠 ctx ━━━━━━──── 182k   🕔 5h ────────── 3%  🔄 ━━━━━━──── 2h04   📅 7j ━───────── 10%  🔄 ━━━━━───── 3j3h
+💬 session 45k tokens · 1,23 $ API   📈 global 4,07Md tokens
 ```
 
-- **Contexte** : la taille actuelle de la conversation, relue à chaque requête, sur la taille maximale de la fenêtre. C'est le chiffre à surveiller pour savoir quand faire `/clear` ou `/compact`. Sa couleur passe du vert au rouge à 300 k, puis au violet à 500 k.
-- **session** : tous les tokens traités dans cette session (envoyés, générés, cache), sous-agents compris, mis à jour à chaque requête. Entre parenthèses : la part en cache, les tokens envoyés hors cache (entrée) et les tokens générés (sortie).
-- **dont cache** : la part relue ou écrite dans le cache de prompt ; Claude relit tout le contexte à chaque requête, à environ un dixième du prix, d'où son poids.
-- **global** : le même cumul sur toutes tes sessions, historique importé compris (voir plus bas).
-- **api** : ce que la session coûterait au prix API, le même total que `/cost`.
-- **abo** : part consommée des quotas 5 h et hebdo, et temps restant avant leur remise à zéro, rafraîchi chaque minute (absent en mode API).
-- **≈ $ d'abo** : coût estimé de la session sur ton abonnement, soit les points de quota hebdo consommés × (prix mensuel × 12/52). Il ne s'affiche que si le prix est réglé.
+Les barres comptent une case par tranche de 10 %. La partie remplie passe du vert au rouge à mesure qu'elle se remplit, le reste est grisé ; le chiffre qui suit, en gras, prend la même couleur. Les libellés sont en gris clair, les icônes dans un gris un peu plus sombre (`#7a7a7a`), sauf 🧠 qui garde ses couleurs. Un emoji ne prend cette couleur que si la police le dessine en monochrome ; une police d'emojis en couleur l'affiche dans ses propres couleurs.
+
+- **ctx** : la taille actuelle de la conversation, relue à chaque requête. La barre se remplit jusqu'au seuil d'autocompact, celui que `/context` indique : pleine, Claude Code compacte la conversation. Sans autocompact, elle se remplit jusqu'à la taille maximale de la fenêtre. C'est le chiffre à surveiller pour savoir quand faire `/clear` ou `/compact`.
+- **5h**, **7j** : part consommée des quotas 5 heures et hebdomadaire. La seconde barre, après 🔄, de couleur fixe, avance avec le temps écoulé dans la fenêtre jusqu'à la remise à zéro, suivie du temps restant ; rafraîchie chaque minute. Une barre de quota plus longue que celle du temps : tu consommes plus vite que le rythme qui tiendrait jusqu'à la remise à zéro. Absents en mode API.
+- **session** : tous les tokens traités dans cette session (envoyés, générés, cache), sous-agents compris, mis à jour à chaque requête, et ce qu'ils coûteraient au prix API, le même total que `/cost`.
+- **global** : le cumul des tokens de toutes tes sessions, historique importé compris (voir plus bas).
+
+Presque tous ces tokens sont des relectures du cache de prompt : Claude relit tout le contexte à chaque requête, à environ un dixième du prix.
 
 ## Installer
 
@@ -25,8 +27,6 @@ claude plugin install token-meter@claude-token-meter
 
 Ou pour une seule session : `claude --plugin-dir ~/Documents/DEV/claude-token-meter`.
 
-Prix de l'abonnement : `/config`, ligne *Subscription price (USD/month)* (Pro 20, Max 5x 100, Max 20x 200).
-
 ## Importer l'historique
 
 ```
@@ -37,7 +37,6 @@ Le script additionne les tokens de toutes les requêtes enregistrées dans `~/.c
 
 ## Limites
 
-- Le % hebdo est celui du compte entier : des sessions en parallèle gonflent l'estimation d'abonnement.
 - Les tokens comptent depuis le chargement du mod ; après un `--resume` le compteur peut repartir de zéro, alors que le coût API couvre toute la session.
 - Deux sessions qui écrivent le total global au même instant peuvent perdre le compte d'une requête.
 

@@ -19,6 +19,13 @@ Chercher dedans le nom exact (`'turn.step'`, `SessionUsage`, `AbovePrompt: {`) p
 - Tests : une réponse simulée à un appel `$` (`session.usage`, `ui.status`, …) s'enveloppe dans `{ value }`.
   `$.store` n'est pas lisible depuis le test ; on vérifie via ce qui est dessiné.
 - `$.ui.status` n'affiche que du texte brut : la couleur exige le bandeau `AbovePrompt` (ui.render).
+  Elle écrase aussi les retours à la ligne (vérifié par l'utilisateur, 2026-10-29).
+- Plusieurs lignes en bas de l'écran : `ui.render` sur `PromptHint`, en enveloppant `await next(e)` (la ligne d'aide du moteur)
+  dans une `Box` en colonne. Choix de l'utilisateur : le compteur tout en bas, pas dans le bandeau `AbovePrompt`.
+  Vérifié sur capture (2026-10-30) : lignes, couleurs, pastilles des agents sur la ligne du moteur. Le compteur a
+  `marginTop={1}` et `paddingLeft={2}` pour s'aligner sous cette ligne.
+- La police de l'utilisateur dessine la plupart des emojis en monochrome : ils prennent `color` (sauf 🧠, en couleur).
+  Elle n'a pas `⏵` (le moteur l'affiche en carrés vides) : vérifier un nouveau symbole sur capture.
 - `turn.step` est un flux : `async function*` et `const r = yield* next(e)`.
 - Changer la forme d'une valeur de `$.state` : renommer sa clé (sinon l'ancienne forme reste en mémoire après un rechargement à chaud).
 
@@ -29,10 +36,9 @@ Chercher dedans le nom exact (`'turn.step'`, `SessionUsage`, `AbovePrompt: {`) p
   via `through` : pas de double comptage.
 - 98,8 % des tokens historiques sont des relectures de cache ; contexte moyen 400 k par requête.
 
-## État au 2026-10-10
+## État au 2026-10-30
 
 - Remote : Gitea du NAS (`ssh://git@192.168.1.11:2222/gbaratte/claude-token-meter.git`). Installé au niveau utilisateur (`token-meter@claude-token-meter`), lu directement
   depuis ce dossier : une modification s'applique avec `/reload-plugins`, sans réinstaller.
-- `subscriptionUsd` pas encore réglé (`/plugin configure token-meter@claude-token-meter`).
+- Estimation du coût sur l'abonnement retirée (2026-10-29) : l'utilisateur la jugeait sans intérêt.
 - Idée proposée, non faite : `/compact` automatique au-delà d'un seuil (`$.session.compact()`).
-- Non vérifié : rendu réel des couleurs dans le terminal de l'utilisateur.

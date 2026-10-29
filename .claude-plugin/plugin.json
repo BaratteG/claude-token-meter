@@ -1,14 +1,6 @@
 {
   "name": "token-meter",
   "version": "0.1.0",
-  "description": "Live token usage, API cost and subscription usage in the status line",
-  "types": "./types/index.d.ts",
-  "userConfig": {
-    "subscriptionUsd": {
-      "type": "number",
-      "title": "Subscription price (USD/month)",
-      "description": "Your plan's monthly price (Pro 20, Max 5x 100, Max 20x 200). 0 hides the subscription cost estimate.",
-      "default": 0
-    }
-  }
+  "description": "Live context size, quota usage, session tokens and API cost under the prompt",
+  "types": "./types/index.d.ts"
 }
