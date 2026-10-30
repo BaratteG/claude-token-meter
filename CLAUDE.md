@@ -42,6 +42,8 @@ Chercher dedans le nom exact (`'turn.step'`, `SessionUsage`, `AbovePrompt: {`) p
   chaque requête une fois, valeur max). Relancer l'import remet le compteur direct (`$.store` `total`) à zéro
   via `through` : pas de double comptage.
 - 98,8 % des tokens historiques sont des relectures de cache ; contexte moyen 400 k par requête.
+- `reference/claude-config/` : copies de `~/.claude/CLAUDE.md` et `~/.claude/agents/*.md`, à partager avec une autre machine.
+  Ne pas les remonter à la racine : un `agents/` à la racine du plugin serait chargé comme agents du mod.
 
 ## État au 2026-10-30
 

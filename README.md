@@ -38,6 +38,16 @@ python3 import_history.py
 
 Le script additionne les tokens de toutes les requêtes enregistrées dans `~/.claude/projects` (chaque requête comptée une fois) et écrit le total dans `hooks/history.ts`. Le mod y ajoute ensuite le comptage en direct. Tu peux le relancer quand tu veux, par exemple après avoir installé le mod : le comptage en direct repart alors de la nouvelle date de coupure. Claude Code supprime les vieilles sessions au bout de 30 jours par défaut (`cleanupPeriodDays`) : relance l'import avant si tu veux tout garder.
 
+## Config Claude de référence
+
+`reference/claude-config/` garde une copie de la config globale de la machine d'origine, à reprendre sur une autre : `CLAUDE.md` (règles de délégation) et `agents/` (les sous-agents scout, worker et deep, avec leur modèle et leur effort). Le mod n'en a pas besoin.
+
+```
+cp -rn reference/claude-config/. ~/.claude/
+```
+
+`-n` ne remplace aucun fichier existant : si l'autre machine a déjà un `~/.claude/CLAUDE.md`, fusionne-le à la main. `settings.json` n'en fait pas partie. Ces fichiers sont des copies : après un changement dans `~/.claude`, recopie-les ici.
+
 ## Limites
 
 - Les tokens comptent depuis le chargement du mod ; après un `--resume` le compteur peut repartir de zéro, alors que le coût API couvre toute la session.
