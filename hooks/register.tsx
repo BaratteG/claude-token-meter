@@ -9,7 +9,10 @@ const session = atom({ plugin: 'token-meter', key: 'meter' } as const, EMPTY)
 const compactAt = atom({ plugin: 'token-meter', key: 'compactAt' } as const, null as CompactAt | null)
 // the rows drawn under the prompt's hint line, each a run of styled segments
 const meterRows = atom({ plugin: 'token-meter', key: 'rows' } as const, [] as Segment[][])
-const runs = atom({ plugin: 'token-meter', key: 'runs' } as const, { agents: {} } as Runs)
+// in the module, not in $.state: a hook reads $.state as it stood when the hook began, so the main loop's
+// request, begun before a subagent's first, would draw the agents' row without it. A reload empties it:
+// an agent comes back at its next request
+const runs: Runs = { agents: {} }
 
 const LABELS: Record<string, string> = { five_hour: '5h', seven_day: '7j' }
 // one per group, two columns wide; the person's font draws all but the context's in one color, so
@@ -57,12 +60,16 @@ const hex = (h: number, s = 0.9, l = 0.5) => {
 // green (hue 120) when empty, through yellow, to red (0) when full
 export const levelColor = (percent: number) => hex(120 - 1.2 * Math.max(0, Math.min(100, percent)))
 
-// a thin 10-cell bar, one cell per 10 %: the filled part colored by level unless told, the rest dim
+// a thin 10-cell bar filled by half cells, 5 % each, the last half `╾` (heavy left, light right): the
+// filled part colored by level unless told, the rest dim. Above 0 at least a half shows, under 100 never all
 export const bar = (percent: number, color = levelColor(percent)): Segment[] => {
-  const n = Math.round(Math.max(0, Math.min(100, percent)) / 10)
+  const p = Math.max(0, Math.min(100, percent))
+  const n = p >= 100 ? 20 : p <= 0 ? 0 : Math.max(1, Math.min(19, Math.round(p / 5)))
+  const full = Math.floor(n / 2)
+  const half = n % 2 === 1
   return [
-    { text: '━'.repeat(n), color },
-    { text: '─'.repeat(10 - n), dimColor: true },
+    { text: '━'.repeat(full) + (half ? '╾' : ''), color },
+    { text: '─'.repeat(10 - full - (half ? 1 : 0)), dimColor: true },
   ].filter(s => s.text)
 }
 
@@ -96,7 +103,17 @@ async function refreshCompactAt($: EngineInterface) {
   if (b) await update($, compactAt, () => ({ tokens: b.isAutoCompactEnabled ? (b.autoCompactThreshold ?? null) : null }))
 }
 
-async function show($: EngineInterface, usage: Pick<SessionUsage, 'context' | 'rateLimits' | 'cost'>) {
+type Usage = Pick<SessionUsage, 'context' | 'rateLimits' | 'cost'>
+
+let drawing: Promise<unknown> = Promise.resolve()
+// one redraw at a time, in the order asked: two at once (a subagent's request and the main loop's)
+// could otherwise land the one that listed the agents first last
+async function show($: EngineInterface, usage?: Usage) {
+  drawing = drawing.catch(() => undefined).then(async () => draw($, usage ?? (await $.session.usage())))
+  await drawing
+}
+
+async function draw($: EngineInterface, usage: Usage) {
   const m = await read($, session)
   const l = await live($)
   // not read yet, after a reload for instance: read it now
@@ -140,11 +157,10 @@ async function show($: EngineInterface, usage: Pick<SessionUsage, 'context' | 'r
   ]
   // the model and effort of a loop's last request
   const run = (r: Run): Segment[] => [figure(modelName(r.model)), ...(r.effort !== undefined ? [unit(` · ${effortName(r.effort)}`)] : [])]
-  const rs = await read($, runs)
 
   // the second row: the main loop's model, this session's tokens and what they cost, then the total over every session
   const figures: Segment[] = [
-    ...(rs.main ? [icon(ICONS.model), ...run(rs.main), GAP] : []),
+    ...(runs.main ? [icon(ICONS.model), ...run(runs.main), GAP] : []),
     icon(ICONS.session),
     label('session'),
     figure(fmt(m.tokens)),
@@ -158,8 +174,8 @@ async function show($: EngineInterface, usage: Pick<SessionUsage, 'context' | 'r
   ]
 
   // the third row, while subagents run: each one's type, model and effort
-  const agents = Object.keys(rs.agents).length > 0 ? (await $.agent.list()).filter(a => rs.agents[a.id] && ACTIVE.has(a.status)) : []
-  const parallel: Segment[] = agents.flatMap((a, i) => [...(i > 0 ? [GAP] : [icon(ICONS.agents)]), label(a.type), ...run(rs.agents[a.id])])
+  const agents = Object.keys(runs.agents).length > 0 ? (await $.agent.list()).filter(a => runs.agents[a.id] && ACTIVE.has(a.status)) : []
+  const parallel: Segment[] = agents.flatMap((a, i) => [...(i > 0 ? [GAP] : [icon(ICONS.agents)]), label(a.type), ...run(runs.agents[a.id])])
 
   const rows = [
     ...(bars.length > 0 ? [bars.flatMap((g, i) => (i > 0 ? [GAP, ...g] : g))] : []),
@@ -184,7 +200,7 @@ export const register: Register = on => {
 
   // the countdowns to the resets move while idle: redraw every minute
   on('session.start', async ($, e, next) => {
-    if (e.isInteractive) $.clock.every(60e3, async () => show($, await $.session.usage()))
+    if (e.isInteractive) $.clock.every(60e3, async () => show($))
     return next(e)
   })
 
@@ -212,10 +228,11 @@ export const register: Register = on => {
   on('turn.step', async function* ($, e, next) {
     const r: Run = { model: e.model, ...(e.effort !== undefined && { effort: e.effort }) }
     const id = e.agentId
-    const isNew = id !== undefined && !(await read($, runs)).agents[id]
-    await update($, runs, m => (id ? { ...m, agents: { ...m.agents, [id]: r } } : { ...m, main: r }))
+    const isNew = id !== undefined && !runs.agents[id]
+    if (id) runs.agents[id] = r
+    else runs.main = r
     // a subagent's first request: on the agents' row while it waits for the answer
-    if (isNew) await show($, await $.session.usage())
+    if (isNew) await show($)
     const { usage: u } = yield* next(e)
     if (!u) return
 
@@ -229,16 +246,14 @@ export const register: Register = on => {
       output: m.output + u.output_tokens,
     }))
     await addGlobal($, n, c)
-    await show($, await $.session.usage())
+    await show($)
   })
 
-  // a subagent's run is over: off the agents' row
+  // a subagent's turn is over: redraw, the agents' list saying whether it is too; one that waits for
+  // its own background work ends a turn and lives on, to start another when that work is done
   on('turn.complete', async ($, e, next) => {
     const id = e.agentId
-    if (id && (await read($, runs)).agents[id]) {
-      await update($, runs, m => ({ ...m, agents: Object.fromEntries(Object.entries(m.agents).filter(([k]) => k !== id)) }))
-      await show($, await $.session.usage())
-    }
+    if (id && runs.agents[id]) await show($)
     return next(e)
   })
 }

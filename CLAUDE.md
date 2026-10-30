@@ -26,7 +26,14 @@ Chercher dedans le nom exact (`'turn.step'`, `SessionUsage`, `AbovePrompt: {`) p
   `marginTop={1}` et `paddingLeft={2}` pour s'aligner sous cette ligne.
 - La police de l'utilisateur dessine la plupart des emojis en monochrome : ils prennent `color` (sauf 🧠, en couleur).
   Elle n'a pas `⏵` (le moteur l'affiche en carrés vides) : vérifier un nouveau symbole sur capture.
+- Barres : l'utilisateur veut le trait fin `━` ; les blocs `█▏▎…` (huitièmes, plus précis) sont trop épais, refusés
+  (2026-10-30). D'où des demi-cases `╾`, 5 % par cran ; `╾` vérifié dans sa police.
 - `turn.step` est un flux : `async function*` et `const r = yield* next(e)`.
+- `$.state` se lit figé : toutes les lectures d'un même hook voient l'état du début de ce hook. Une requête du fil
+  principal commencée avant celle d'un sous-agent ne voit pas ce qu'il a écrit. Ce qui doit être lu à l'instant
+  (les modèles des agents) va dans une variable du module.
+- Le `turn.complete` d'un sous-agent ne marque pas sa fin : il termine un tour pour attendre son propre travail en
+  arrière-plan (statut `waiting` dans `$.agent.list()`) et en reprend un autre ensuite. C'est le statut qui fait foi.
 - Changer la forme d'une valeur de `$.state` : renommer sa clé (sinon l'ancienne forme reste en mémoire après un rechargement à chaud).
 
 ## Données

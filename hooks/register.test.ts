@@ -95,7 +95,7 @@ test('draws a bar per quota', async ($, on) => {
   world(on)
   await measure($, [{ kind: 'five_hour', percentUsed: 3 }, { kind: 'seven_day', percentUsed: 10 }])
   expect((await status($))).toBe(
-    `🕔 5h ────────── 3%   📅 7j ━───────── 10%\n💬 session 0 tokens · 1,50 $ API   📈 global ${fmt(HISTORY.tokens)} tokens`,
+    `🕔 5h ╾───────── 3%   📅 7j ━───────── 10%\n💬 session 0 tokens · 1,50 $ API   📈 global ${fmt(HISTORY.tokens)} tokens`,
   )
 })
 
@@ -106,27 +106,27 @@ test('counts down to each window reset, redrawn every minute', async ($, on) => 
   ])
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await clock.advance(60e3)
-  expect((await status($))).toContain('   🕔 5h ────────── 3%  🔄 ━━━━━━──── 2h04   📅 7j ━───────── 10%  🔄 ━━━━━───── 3j3h\n')
+  expect((await status($))).toContain('   🕔 5h ╾───────── 3%  🔄 ━━━━━━──── 2h04   📅 7j ━───────── 10%  🔄 ━━━━━╾──── 3j3h\n')
   await clock.advance(120 * 60e3)
-  expect((await status($))).toContain('   🕔 5h ────────── 3%  🔄 ━━━━━━━━━━ 4min   📅 7j ━───────── 10%  🔄 ━━━━━━──── 3j1h\n')
+  expect((await status($))).toContain('   🕔 5h ╾───────── 3%  🔄 ━━━━━━━━━╾ 4min   📅 7j ━───────── 10%  🔄 ━━━━━╾──── 3j1h\n')
 })
 
-test('draws a percentage as a 10-cell bar, one cell per 10 %', async () => {
-  expect([0, 4, 5, 37, 100, 120].map(p => bar(p).map(s => s.text).join(''))).toEqual(
-    ['──────────', '──────────', '━─────────', '━━━━──────', '━━━━━━━━━━', '━━━━━━━━━━'],
+test('draws a percentage as a 10-cell bar filled by half cells, never empty above 0 nor full under 100', async () => {
+  expect([0, 1, 4, 7.5, 37, 99, 100, 120].map(p => bar(p).map(s => s.text).join(''))).toEqual(
+    ['──────────', '╾─────────', '╾─────────', '━─────────', '━━━╾──────', '━━━━━━━━━╾', '━━━━━━━━━━', '━━━━━━━━━━'],
   )
 })
 
 test('fills the context bar toward the auto-compaction threshold', async ($, on) => {
   world(on, {}, [], 400_000)
   await step($, 0)
-  expect((await status($))).toStartWith('🧠 ctx ━───────── 50k\n')
+  expect((await status($))).toStartWith('🧠 ctx ━╾──────── 50k\n')
 })
 
 test('without auto-compaction, the context bar fills toward the whole window', async ($, on) => {
   world(on, {}, [], null)
   await step($, 0)
-  expect((await status($))).toStartWith('🧠 ctx ━━━─────── 50k\n')
+  expect((await status($))).toStartWith('🧠 ctx ━━╾─────── 50k\n')
 })
 
 test("keeps the engine's hint line above the meter", async ($, on) => {
@@ -143,7 +143,7 @@ test("keeps the engine's hint line above the meter", async ($, on) => {
 test('colors the filled part green to red by level, dims the rest', async ($, on) => {
   expect([0, 50, 100, 150].map(levelColor)).toEqual(['#0df20d', '#f2f20d', '#f20d0d', '#f20d0d'])
   expect(bar(37)).toEqual([
-    { text: '━━━━', color: levelColor(37) },
+    { text: '━━━╾', color: levelColor(37) },
     { text: '──────', dimColor: true },
   ])
   world(on)
@@ -180,19 +180,25 @@ test('names a model by its family and version', async () => {
   )
 })
 
-test('lists the subagents running, each with its model and effort, until its run ends', async ($, on) => {
+test('lists the subagents running, each with its model and effort, until the engine says they are done', async ($, on) => {
   world(on)
-  const status = { a1: 'running', a2: 'running', a3: 'completed' }
+  const status: Record<string, string> = { a1: 'running', a2: 'running', a3: 'completed' }
   on('agent.list', () => ({
     value: Object.entries(status).map(([id, s]) => ({ id, description: id, type: { a1: 'scout', a2: 'worker', a3: 'deep' }[id]!, status: s as never })),
   }))
+  const complete = (agentId: string) => $.turn.complete({ turnId: 't', agentId, answer: '', durationMs: 0, isAborted: false, reason: 'answer' })
   await step($, 0)
   await step($, 0, { agentId: 'a1', model: 'claude-haiku-5-5', effort: 'low' })
   await step($, 0, { agentId: 'a2', model: 'claude-sonnet-5-5' })
   await step($, 0, { agentId: 'a3', model: 'claude-opus-5-5' })
   expect((await bottom($)).at(-1)).toBe('👥 scout Haiku 5.5 · low   worker Sonnet 5.5 · high')
-  await $.turn.complete({ turnId: 't', agentId: 'a1', answer: '', durationMs: 0, isAborted: false, reason: 'answer' })
+  // a turn that ends on background work of its own: the agent lives on
+  await complete('a1')
+  expect((await bottom($)).at(-1)).toBe('👥 scout Haiku 5.5 · low   worker Sonnet 5.5 · high')
+  status.a1 = 'completed'
+  await complete('a1')
   expect((await bottom($)).at(-1)).toBe('👥 worker Sonnet 5.5 · high')
-  await $.turn.complete({ turnId: 't', agentId: 'a2', answer: '', durationMs: 0, isAborted: false, reason: 'answer' })
+  status.a2 = 'killed'
+  await complete('a2')
   expect((await bottom($)).at(-1)).toStartWith('🤖 Opus 5.5 · high   💬 session')
 })
